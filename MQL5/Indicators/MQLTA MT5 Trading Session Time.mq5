@@ -1,7 +1,7 @@
 #property link          "https://www.earnforex.com/metatrader-indicators/trading-session-time/"
-#property version       "1.01"
+#property version       "1.02"
 
-#property copyright     "EarnForex.com - 2019-2023"
+#property copyright     "EarnForex.com - 2019-2024"
 #property description   "Trading Session Time Indicator"
 #property description   "Draw a vertical line, rectangle, or colored candles for the specified time and day."
 #property description   " "
@@ -43,6 +43,8 @@ int StartMinute = 0;
 int EndHour = 0;
 int EndMinute = 0;
 int BarsInChart = 0;
+datetime LatestSessionStart = 0;
+datetime LatestSessionEnd = 0;
 
 double ColorCandlesBuffer1[]; 
 double ColorCandlesBuffer2[]; 
@@ -58,17 +60,17 @@ int OnInit()
         return INIT_FAILED;
     }
 
-    if (DrawCandles)
-    {
-        SetIndexBuffer(0, ColorCandlesBuffer1, INDICATOR_DATA);
-        SetIndexBuffer(1, ColorCandlesBuffer2, INDICATOR_DATA);
-        SetIndexBuffer(2, ColorCandlesBuffer3, INDICATOR_DATA);
-        SetIndexBuffer(3, ColorCandlesBuffer4, INDICATOR_DATA);
-        ArraySetAsSeries(ColorCandlesBuffer1, true);
-        ArraySetAsSeries(ColorCandlesBuffer2, true);
-        ArraySetAsSeries(ColorCandlesBuffer3, true);
-        ArraySetAsSeries(ColorCandlesBuffer4, true);
-    }
+    // Cannot NOT declare all the buffers even when DrawCandles == false because of an MT5 bug.
+    SetIndexBuffer(0, ColorCandlesBuffer1, INDICATOR_DATA);
+    SetIndexBuffer(1, ColorCandlesBuffer2, INDICATOR_DATA);
+    SetIndexBuffer(2, ColorCandlesBuffer3, INDICATOR_DATA);
+    SetIndexBuffer(3, ColorCandlesBuffer4, INDICATOR_DATA);
+    ArraySetAsSeries(ColorCandlesBuffer1, true);
+    ArraySetAsSeries(ColorCandlesBuffer2, true);
+    ArraySetAsSeries(ColorCandlesBuffer3, true);
+    ArraySetAsSeries(ColorCandlesBuffer4, true);
+    PlotIndexSetDouble(0, PLOT_EMPTY_VALUE, EMPTY_VALUE);
+    if (!DrawCandles) PlotIndexSetInteger(0, PLOT_SHOW_DATA, false);
 
     return INIT_SUCCEEDED;
 }
@@ -84,7 +86,7 @@ int OnCalculate(const int rates_total,
                 const long &volume[],
                 const int &spread[])
 {
-    if ((Bars(Symbol(), PERIOD_CURRENT) != BarsInChart) || (prev_calculated == 0))
+    if ((Bars(Symbol(), PERIOD_CURRENT) != BarsInChart) || (prev_calculated == 0)) // New bar or bars.
     {
         ArrayInitialize(ColorCandlesBuffer1, EMPTY_VALUE);
         ArrayInitialize(ColorCandlesBuffer2, EMPTY_VALUE);
@@ -96,7 +98,13 @@ int OnCalculate(const int rates_total,
         else DrawAreas();
         BarsInChart = Bars(Symbol(), PERIOD_CURRENT);
     }
-
+    else // No new bars.
+    {
+        // Updates related to the current candle.
+        if (DrawCandles) UpdateCurrentCandlestick();
+        else if (TimeLineEnd == "") UpdateCurrentLine();
+        else UpdateCurrentArea();
+    }
     return rates_total;
 }
 
@@ -183,7 +191,9 @@ void DrawLine(datetime LineTime)
         datetime EndTimeTmp = StringToTime(EndTimeStructStr);
         int StartBar = iBarShift(Symbol(), PERIOD_CURRENT, StartTimeTmp);
         int EndBar = iBarShift(Symbol(), PERIOD_CURRENT, EndTimeTmp);
-        int BarsCount = StartBar - EndBar;
+        if (StartBar == EndBar) return; // Empty session.
+        if ((EndBar != 0) || (iTime(Symbol(), PERIOD_CURRENT, 0) >= EndTimeTmp)) EndBar++; // End bar itself shouldn't be included unless it's the latest bar that makes a part of the session.
+        int BarsCount = StartBar - EndBar + 1;
         double HighPoint = iHigh(Symbol(), PERIOD_CURRENT, iHighest(Symbol(), PERIOD_CURRENT, MODE_HIGH, BarsCount, EndBar));
         string LabelName = IndicatorName + "-LABEL-" + IntegerToString(LineTime);
         ObjectCreate(0, LabelName, OBJ_TEXT, 0, LineTime, HighPoint);
@@ -194,11 +204,32 @@ void DrawLine(datetime LineTime)
         ObjectSetInteger(0, LabelName, OBJPROP_ANCHOR, ANCHOR_LEFT_LOWER);
         ObjectSetString(0, LabelName, OBJPROP_FONT, "Consolas");
         ObjectSetInteger(0, LabelName, OBJPROP_FONTSIZE, 10);        
-        string Text;
-        if (SessionLabel != "")
+        string Text = SessionLabel;
+        if (ShowRange)
         {
-            Text += " " + SessionLabel;
+            double LowPoint = iLow(Symbol(), PERIOD_CURRENT, iLowest(Symbol(), PERIOD_CURRENT, MODE_LOW, BarsCount, EndBar));
+            Text += " " + IntegerToString(int((HighPoint - LowPoint) / _Point));
         }
+        ObjectSetString(0, LabelName, OBJPROP_TEXT, Text);
+        if (EndTimeTmp > LatestSessionEnd) LatestSessionEnd = EndTimeTmp;
+        if (LineTime > LatestSessionStart) LatestSessionStart = LineTime;
+    }
+}
+
+void UpdateCurrentLine()
+{
+    if (LatestSessionEnd == 0) return; // Nothing to update.
+    if (iTime(Symbol(), PERIOD_CURRENT, 0) >= LatestSessionEnd) return; // The current bar is outside the session.
+
+    if ((SessionLabel != "") || (ShowRange)) // Update the label if required.
+    {
+        int StartBar = iBarShift(Symbol(), PERIOD_CURRENT, LatestSessionStart);
+        int EndBar = 0; // Always the latest bar.
+        int BarsCount = StartBar - EndBar + 1;
+        double HighPoint = iHigh(Symbol(), PERIOD_CURRENT, iHighest(Symbol(), PERIOD_CURRENT, MODE_HIGH, BarsCount, EndBar));
+        string LabelName = IndicatorName + "-LABEL-" + IntegerToString(LatestSessionStart);
+        ObjectSetDouble(0, LabelName, OBJPROP_PRICE, 0, HighPoint);
+        string Text = SessionLabel;
         if (ShowRange)
         {
             double LowPoint = iLow(Symbol(), PERIOD_CURRENT, iLowest(Symbol(), PERIOD_CURRENT, MODE_LOW, BarsCount, EndBar));
@@ -251,7 +282,9 @@ void DrawArea(datetime Start, datetime End)
     string AreaName = IndicatorName + "-AREA-" + IntegerToString(Start);
     int StartBar = iBarShift(Symbol(), PERIOD_CURRENT, Start);
     int EndBar = iBarShift(Symbol(), PERIOD_CURRENT, End);
-    int BarsCount = StartBar - EndBar;
+    if (StartBar == EndBar) return; // Empty session.
+    if ((EndBar != 0) || (iTime(Symbol(), PERIOD_CURRENT, 0) >= End)) EndBar++; // End bar itself shouldn't be included unless it's the latest bar that makes a part of the session.
+    int BarsCount = StartBar - EndBar + 1;
     double HighPoint = iHigh(Symbol(), PERIOD_CURRENT, iHighest(Symbol(), PERIOD_CURRENT, MODE_HIGH, BarsCount, EndBar));
     double LowPoint = iLow(Symbol(), PERIOD_CURRENT, iLowest(Symbol(), PERIOD_CURRENT, MODE_LOW, BarsCount, EndBar));
     ObjectCreate(0, AreaName, OBJ_RECTANGLE, 0, Start, HighPoint, End, LowPoint);
@@ -274,16 +307,45 @@ void DrawArea(datetime Start, datetime End)
         ObjectSetInteger(0, LabelName, OBJPROP_ANCHOR, ANCHOR_LEFT_LOWER);
         ObjectSetString(0, LabelName, OBJPROP_FONT, "Consolas");
         ObjectSetInteger(0, LabelName, OBJPROP_FONTSIZE, 10);        
-        string Text;
-        if (SessionLabel != "")
-        {
-            Text += " " + SessionLabel;
-        }
+        string Text = SessionLabel;
         if (ShowRange)
         {
             Text += " " + IntegerToString(int((HighPoint - LowPoint) / _Point));
         }
         ObjectSetString(0, LabelName, OBJPROP_TEXT, Text);
+    }
+    if (Start > LatestSessionStart) LatestSessionStart = Start;
+}
+
+void UpdateCurrentArea()
+{
+    if (LatestSessionStart == 0) return; // Nothing to update.
+    string AreaName = IndicatorName + "-AREA-" + IntegerToString(LatestSessionStart);
+    datetime End = (datetime)ObjectGetInteger(0, AreaName, OBJPROP_TIME, 1);
+    if (iTime(Symbol(), PERIOD_CURRENT, 0) >= End) return; // The current bar is outside the session.
+
+    double prevHighPoint = ObjectGetDouble(0, AreaName, OBJPROP_PRICE, 0);
+    double prevLowPoint = ObjectGetDouble(0, AreaName, OBJPROP_PRICE, 1);
+    int StartBar = iBarShift(Symbol(), PERIOD_CURRENT, LatestSessionStart);
+    int EndBar = 0; // Always the latest bar.
+    int BarsCount = StartBar - EndBar + 1;
+    double HighPoint = iHigh(Symbol(), PERIOD_CURRENT, iHighest(Symbol(), PERIOD_CURRENT, MODE_HIGH, BarsCount, EndBar));
+    double LowPoint = iLow(Symbol(), PERIOD_CURRENT, iLowest(Symbol(), PERIOD_CURRENT, MODE_LOW, BarsCount, EndBar));
+    if ((HighPoint > prevHighPoint) || (LowPoint < prevLowPoint)) // Update is needed.
+    {
+        ObjectSetDouble(0, AreaName, OBJPROP_PRICE, 0, HighPoint);
+        ObjectSetDouble(0, AreaName, OBJPROP_PRICE, 1, LowPoint);
+        if ((SessionLabel != "") || (ShowRange)) // Update the label if required.
+        {
+            string LabelName = IndicatorName + "-LABEL-" + IntegerToString(LatestSessionStart);
+            ObjectSetDouble(0, LabelName, OBJPROP_PRICE, 0, HighPoint);
+            string Text = SessionLabel;
+            if (ShowRange)
+            {
+                Text += " " + IntegerToString(int((HighPoint - LowPoint) / _Point));
+            }
+            ObjectSetString(0, LabelName, OBJPROP_TEXT, Text);
+        }
     }
 }
 
@@ -334,7 +396,9 @@ void DrawCandlesticksSession(datetime Start, datetime End)
 {
     int StartBar = iBarShift(Symbol(), PERIOD_CURRENT, Start);
     int EndBar = iBarShift(Symbol(), PERIOD_CURRENT, End);
-    int BarsCount = StartBar - EndBar;
+    if (StartBar == EndBar) return; // Empty session.
+    if ((EndBar != 0) || (iTime(Symbol(), PERIOD_CURRENT, 0) >= End)) EndBar++; // End bar itself shouldn't be included unless it's the latest bar that makes a part of the session.
+    int BarsCount = StartBar - EndBar + 1;
 
     for (int i = StartBar; i >= EndBar; i--)
     {
@@ -356,11 +420,37 @@ void DrawCandlesticksSession(datetime Start, datetime End)
         ObjectSetInteger(0, LabelName, OBJPROP_ANCHOR, ANCHOR_LEFT_LOWER);
         ObjectSetString(0, LabelName, OBJPROP_FONT, "Consolas");
         ObjectSetInteger(0, LabelName, OBJPROP_FONTSIZE, 10);        
-        string Text;
-        if (SessionLabel != "")
+        string Text = SessionLabel;
+        if (ShowRange)
         {
-            Text += " " + SessionLabel;
+            double LowPoint = iLow(Symbol(), PERIOD_CURRENT, iLowest(Symbol(), PERIOD_CURRENT, MODE_LOW, BarsCount, EndBar));
+            Text += " " + IntegerToString(int((HighPoint - LowPoint) / _Point));
         }
+        ObjectSetString(0, LabelName, OBJPROP_TEXT, Text);
+    }
+    if (Start > LatestSessionStart) LatestSessionStart = Start;
+    if (End > LatestSessionEnd) LatestSessionEnd = End;
+}
+
+void UpdateCurrentCandlestick()
+{
+    if (LatestSessionEnd == 0) return; // Nothing to update.
+    if (iTime(Symbol(), PERIOD_CURRENT, 0) >= LatestSessionEnd) return; // The current bar is outside the session.
+    
+    ColorCandlesBuffer1[0] = iOpen(Symbol(), PERIOD_CURRENT, 0);
+    ColorCandlesBuffer2[0] = iHigh(Symbol(), PERIOD_CURRENT, 0);
+    ColorCandlesBuffer3[0] = iLow(Symbol(), PERIOD_CURRENT, 0);
+    ColorCandlesBuffer4[0] = iClose(Symbol(), PERIOD_CURRENT, 0);
+    
+    if ((SessionLabel != "") || (ShowRange)) // Update the label if required.
+    {
+        int StartBar = iBarShift(Symbol(), PERIOD_CURRENT, LatestSessionStart);
+        int EndBar = 0; // Always the latest bar.
+        int BarsCount = StartBar - EndBar + 1;
+        double HighPoint = iHigh(Symbol(), PERIOD_CURRENT, iHighest(Symbol(), PERIOD_CURRENT, MODE_HIGH, BarsCount, EndBar));
+        string LabelName = IndicatorName + "-LABEL-" + IntegerToString(LatestSessionStart);
+        ObjectSetDouble(0, LabelName, OBJPROP_PRICE, 0, HighPoint);
+        string Text = SessionLabel;
         if (ShowRange)
         {
             double LowPoint = iLow(Symbol(), PERIOD_CURRENT, iLowest(Symbol(), PERIOD_CURRENT, MODE_LOW, BarsCount, EndBar));
