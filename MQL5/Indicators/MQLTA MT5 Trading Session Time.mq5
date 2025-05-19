@@ -1,13 +1,13 @@
 #property link          "https://www.earnforex.com/metatrader-indicators/trading-session-time/"
-#property version       "1.02"
+#property version       "1.03"
 
-#property copyright     "EarnForex.com - 2019-2024"
+#property copyright     "EarnForex.com - 2019-2025"
 #property description   "Trading Session Time Indicator"
 #property description   "Draw a vertical line, rectangle, or colored candles for the specified time and day."
-#property description   " "
+#property description   ""
 #property description   "WARNING: Use this software at your own risk."
-#property description   "The creator of these plugins cannot be held responsible for any damage or loss."
-#property description   " "
+#property description   "The creator of this indicator cannot be held responsible for any damage or loss."
+#property description   ""
 #property description   "Find More on www.EarnForex.com"
 #property icon          "\\Files\\EF-Icon-64x64px.ico"
 
@@ -20,7 +20,7 @@
 input string Comment1 = "========================"; // MQLTA Trading Session Time
 input string IndicatorName = "MQLTA-TST";           // Indicator Short Name
 input string Comment2 = "========================"; // Indicator Parameters
-input bool DrawCandles = false;                     // Candlessticks Display
+input bool DrawCandles = false;                     // Candlesticks Display
 input string TimeLineStart = "0000";                // Start Time To Draw (Format 24H HHMM)
 input string TimeLineEnd = "";                      // End Time To Draw (Optional - Format HHMM)
 input bool ShowMonday = true;                       // Show If Monday
@@ -37,6 +37,7 @@ input bool ShowRange = false;                       // Show Range in Points
 input string Comment_3 = "====================";    // Objects Options
 input color LineColor = clrLightGray;               // Objects Color
 input int LineThickness = 5;                        // Objects Thickness (For Line, Set 1 to 5)
+input bool DrawRectangles = false;                  // Draw Rectangles Instead of Areas?
 
 int StartHour = 0;
 int StartMinute = 0;
@@ -105,12 +106,14 @@ int OnCalculate(const int rates_total,
         else if (TimeLineEnd == "") UpdateCurrentLine();
         else UpdateCurrentArea();
     }
+    ChartRedraw();
     return rates_total;
 }
 
 void OnDeinit(const int reason)
 {
     CleanChart();
+    ChartRedraw();
 }
 
 void OnInitInitialization()
@@ -155,18 +158,30 @@ void DrawLines()
     TimeToStruct(iTime(Symbol(), PERIOD_CURRENT, 0), CurrentTime);
     string CurrentTimeStr = (string)CurrentTime.year + "." + (string)CurrentTime.mon + "." + (string)CurrentTime.day + " " + (string)StartHour + ":" + (string)StartMinute;
     datetime CurrTime = StringToTime(CurrentTimeStr);
-    while ((CurrTime > MaxTime) && (iClose(Symbol(), PERIOD_CURRENT, iBarShift(Symbol(), PERIOD_CURRENT, CurrTime)) > 0))
+    if (ShowFutureSession) CurrTime += PeriodSeconds(PERIOD_D1) * 30; // Some distance in the future.
+    while ((CurrTime > MaxTime) && (iClose(Symbol(), PERIOD_CURRENT, iBarShiftCustom(Symbol(), PERIOD_CURRENT, CurrTime)) > 0))
     {
         if ((ShowFutureSession) || (CurrTime <= iTime(Symbol(), PERIOD_CURRENT, 0))) // Skip future session if not to be displayed.
         {
             TimeToStruct(CurrTime, CurrentTime);
-            if ((CurrentTime.day_of_week == 0) && (ShowSunday)) DrawLine(CurrTime);
-            if ((CurrentTime.day_of_week == 1) && (ShowMonday)) DrawLine(CurrTime);
-            if ((CurrentTime.day_of_week == 2) && (ShowTuesday)) DrawLine(CurrTime);
-            if ((CurrentTime.day_of_week == 3) && (ShowWednesday)) DrawLine(CurrTime);
-            if ((CurrentTime.day_of_week == 4) && (ShowThursday)) DrawLine(CurrTime);
-            if ((CurrentTime.day_of_week == 5) && (ShowFriday)) DrawLine(CurrTime);
-            if ((CurrentTime.day_of_week == 6) && (ShowSaturday)) DrawLine(CurrTime);
+            bool allow_draw = true;
+            if (CurrTime <= iTime(Symbol(), PERIOD_CURRENT, 0))
+            {
+                datetime bar_time = iTime(Symbol(), PERIOD_CURRENT, iBarShiftCustom(Symbol(), PERIOD_CURRENT, CurrTime));
+                MqlDateTime bt_struct;
+                TimeToStruct(bar_time, bt_struct); 
+                if (bt_struct.day_of_week != CurrentTime.day_of_week) allow_draw = false; // To avoid drawing the day of the week on the next one when the needed one is missing.
+            }
+            if (allow_draw)
+            {
+                if ((CurrentTime.day_of_week == 0) && (ShowSunday)) DrawLine(CurrTime);
+                else if ((CurrentTime.day_of_week == 1) && (ShowMonday)) DrawLine(CurrTime);
+                else if ((CurrentTime.day_of_week == 2) && (ShowTuesday)) DrawLine(CurrTime);
+                else if ((CurrentTime.day_of_week == 3) && (ShowWednesday)) DrawLine(CurrTime);
+                else if ((CurrentTime.day_of_week == 4) && (ShowThursday)) DrawLine(CurrTime);
+                else if ((CurrentTime.day_of_week == 5) && (ShowFriday)) DrawLine(CurrTime);
+                else if ((CurrentTime.day_of_week == 6) && (ShowSaturday)) DrawLine(CurrTime);
+            }
         }
         CurrTime -= PeriodSeconds(PERIOD_D1);
     }
@@ -182,15 +197,15 @@ void DrawLine(datetime LineTime)
     ObjectSetInteger(0, LineName, OBJPROP_HIDDEN, true);
     ObjectSetInteger(0, LineName, OBJPROP_SELECTED, false);
     ObjectSetInteger(0, LineName, OBJPROP_WIDTH, LineThickness);
-    if ((SessionLabel != "") || (ShowRange))
+    if (((SessionLabel != "") || (ShowRange)) && (LineTime <= iTime(Symbol(), PERIOD_CURRENT, 0))) // Won't work for future sessions.
     {
         datetime StartTimeTmp = LineTime;
         MqlDateTime EndTimeStruct;
         TimeToStruct(LineTime, EndTimeStruct);
         string EndTimeStructStr = (string)EndTimeStruct.year + "." + (string)EndTimeStruct.mon + "." + (string)EndTimeStruct.day + " " + "23:59";
         datetime EndTimeTmp = StringToTime(EndTimeStructStr);
-        int StartBar = iBarShift(Symbol(), PERIOD_CURRENT, StartTimeTmp);
-        int EndBar = iBarShift(Symbol(), PERIOD_CURRENT, EndTimeTmp);
+        int StartBar = iBarShiftCustom(Symbol(), PERIOD_CURRENT, StartTimeTmp);
+        int EndBar = iBarShiftCustom(Symbol(), PERIOD_CURRENT, EndTimeTmp);
         if (StartBar == EndBar) return; // Empty session.
         if ((EndBar != 0) || (iTime(Symbol(), PERIOD_CURRENT, 0) >= EndTimeTmp)) EndBar++; // End bar itself shouldn't be included unless it's the latest bar that makes a part of the session.
         int BarsCount = StartBar - EndBar + 1;
@@ -223,7 +238,7 @@ void UpdateCurrentLine()
 
     if ((SessionLabel != "") || (ShowRange)) // Update the label if required.
     {
-        int StartBar = iBarShift(Symbol(), PERIOD_CURRENT, LatestSessionStart);
+        int StartBar = iBarShiftCustom(Symbol(), PERIOD_CURRENT, LatestSessionStart);
         int EndBar = 0; // Always the latest bar.
         int BarsCount = StartBar - EndBar + 1;
         double HighPoint = iHigh(Symbol(), PERIOD_CURRENT, iHighest(Symbol(), PERIOD_CURRENT, MODE_HIGH, BarsCount, EndBar));
@@ -259,19 +274,16 @@ void DrawAreas()
     {
         EndTimeTmp += PeriodSeconds(PERIOD_D1);
     }
-    while ((StartTimeTmp > MaxTime) && (iClose(Symbol(), PERIOD_CURRENT, iBarShift(Symbol(), PERIOD_CURRENT, StartTimeTmp)) > 0))
+    while ((StartTimeTmp > MaxTime) && (iClose(Symbol(), PERIOD_CURRENT, iBarShiftCustom(Symbol(), PERIOD_CURRENT, StartTimeTmp)) > 0))
     {
-        if ((ShowFutureSession) || (StartTimeTmp <= iTime(Symbol(), PERIOD_CURRENT, 0))) // Skip future session if not to be displayed.
-        {
-            TimeToStruct(StartTimeTmp, StartTimeStruct);
-            if ((StartTimeStruct.day_of_week == 0) && (ShowSunday)) DrawArea(StartTimeTmp, EndTimeTmp);
-            if ((StartTimeStruct.day_of_week == 1) && (ShowMonday)) DrawArea(StartTimeTmp, EndTimeTmp);
-            if ((StartTimeStruct.day_of_week == 2) && (ShowTuesday)) DrawArea(StartTimeTmp, EndTimeTmp);
-            if ((StartTimeStruct.day_of_week == 3) && (ShowWednesday)) DrawArea(StartTimeTmp, EndTimeTmp);
-            if ((StartTimeStruct.day_of_week == 4) && (ShowThursday)) DrawArea(StartTimeTmp, EndTimeTmp);
-            if ((StartTimeStruct.day_of_week == 5) && (ShowFriday)) DrawArea(StartTimeTmp, EndTimeTmp);
-            if ((StartTimeStruct.day_of_week == 6) && (ShowSaturday)) DrawArea(StartTimeTmp, EndTimeTmp);
-        }
+        TimeToStruct(StartTimeTmp, StartTimeStruct);
+        if ((StartTimeStruct.day_of_week == 0) && (ShowSunday)) DrawArea(StartTimeTmp, EndTimeTmp);
+        else if ((StartTimeStruct.day_of_week == 1) && (ShowMonday)) DrawArea(StartTimeTmp, EndTimeTmp);
+        else if ((StartTimeStruct.day_of_week == 2) && (ShowTuesday)) DrawArea(StartTimeTmp, EndTimeTmp);
+        else if ((StartTimeStruct.day_of_week == 3) && (ShowWednesday)) DrawArea(StartTimeTmp, EndTimeTmp);
+        else if ((StartTimeStruct.day_of_week == 4) && (ShowThursday)) DrawArea(StartTimeTmp, EndTimeTmp);
+        else if ((StartTimeStruct.day_of_week == 5) && (ShowFriday)) DrawArea(StartTimeTmp, EndTimeTmp);
+        else if ((StartTimeStruct.day_of_week == 6) && (ShowSaturday)) DrawArea(StartTimeTmp, EndTimeTmp);
         StartTimeTmp -= PeriodSeconds(PERIOD_D1);
         EndTimeTmp -= PeriodSeconds(PERIOD_D1);
     }
@@ -280,8 +292,8 @@ void DrawAreas()
 void DrawArea(datetime Start, datetime End)
 {
     string AreaName = IndicatorName + "-AREA-" + IntegerToString(Start);
-    int StartBar = iBarShift(Symbol(), PERIOD_CURRENT, Start);
-    int EndBar = iBarShift(Symbol(), PERIOD_CURRENT, End);
+    int StartBar = iBarShiftCustom(Symbol(), PERIOD_CURRENT, Start);
+    int EndBar = iBarShiftCustom(Symbol(), PERIOD_CURRENT, End);
     if (StartBar == EndBar) return; // Empty session.
     if ((EndBar != 0) || (iTime(Symbol(), PERIOD_CURRENT, 0) >= End)) EndBar++; // End bar itself shouldn't be included unless it's the latest bar that makes a part of the session.
     int BarsCount = StartBar - EndBar + 1;
@@ -292,9 +304,9 @@ void DrawArea(datetime Start, datetime End)
     ObjectSetInteger(0, AreaName, OBJPROP_BACK, true);
     ObjectSetInteger(0, AreaName, OBJPROP_STYLE, STYLE_SOLID);
     ObjectSetInteger(0, AreaName, OBJPROP_HIDDEN, true);
-    ObjectSetInteger(0, AreaName, OBJPROP_FILL, true);
+    ObjectSetInteger(0, AreaName, OBJPROP_FILL, !DrawRectangles);
     ObjectSetInteger(0, AreaName, OBJPROP_SELECTED, false);
-    ObjectSetInteger(0, AreaName, OBJPROP_WIDTH, LineThickness);
+    ObjectSetInteger(0, AreaName, OBJPROP_SELECTABLE, false);
     
     if ((SessionLabel != "") || (ShowRange))
     {
@@ -326,7 +338,7 @@ void UpdateCurrentArea()
 
     double prevHighPoint = ObjectGetDouble(0, AreaName, OBJPROP_PRICE, 0);
     double prevLowPoint = ObjectGetDouble(0, AreaName, OBJPROP_PRICE, 1);
-    int StartBar = iBarShift(Symbol(), PERIOD_CURRENT, LatestSessionStart);
+    int StartBar = iBarShiftCustom(Symbol(), PERIOD_CURRENT, LatestSessionStart);
     int EndBar = 0; // Always the latest bar.
     int BarsCount = StartBar - EndBar + 1;
     double HighPoint = iHigh(Symbol(), PERIOD_CURRENT, iHighest(Symbol(), PERIOD_CURRENT, MODE_HIGH, BarsCount, EndBar));
@@ -374,19 +386,16 @@ void DrawCandlesticks()
     {
         EndTimeTmp += PeriodSeconds(PERIOD_D1);
     }
-    while ((StartTimeTmp > MaxTime) && (iClose(Symbol(), PERIOD_CURRENT, iBarShift(Symbol(), PERIOD_CURRENT, StartTimeTmp)) > 0))
+    while ((StartTimeTmp > MaxTime) && (iClose(Symbol(), PERIOD_CURRENT, iBarShiftCustom(Symbol(), PERIOD_CURRENT, StartTimeTmp)) > 0))
     {
-        if ((ShowFutureSession) || (StartTimeTmp <= iTime(Symbol(), PERIOD_CURRENT, 0))) // Skip future session if not to be displayed.
-        {
-            TimeToStruct(StartTimeTmp, StartTimeStruct);
-            if ((StartTimeStruct.day_of_week == 0) && (ShowSunday)) DrawCandlesticksSession(StartTimeTmp, EndTimeTmp);
-            if ((StartTimeStruct.day_of_week == 1) && (ShowMonday)) DrawCandlesticksSession(StartTimeTmp, EndTimeTmp);
-            if ((StartTimeStruct.day_of_week == 2) && (ShowTuesday)) DrawCandlesticksSession(StartTimeTmp, EndTimeTmp);
-            if ((StartTimeStruct.day_of_week == 3) && (ShowWednesday)) DrawCandlesticksSession(StartTimeTmp, EndTimeTmp);
-            if ((StartTimeStruct.day_of_week == 4) && (ShowThursday)) DrawCandlesticksSession(StartTimeTmp, EndTimeTmp);
-            if ((StartTimeStruct.day_of_week == 5) && (ShowFriday)) DrawCandlesticksSession(StartTimeTmp, EndTimeTmp);
-            if ((StartTimeStruct.day_of_week == 6) && (ShowSaturday)) DrawCandlesticksSession(StartTimeTmp, EndTimeTmp);
-        }
+        TimeToStruct(StartTimeTmp, StartTimeStruct);
+        if ((StartTimeStruct.day_of_week == 0) && (ShowSunday)) DrawCandlesticksSession(StartTimeTmp, EndTimeTmp);
+        else if ((StartTimeStruct.day_of_week == 1) && (ShowMonday)) DrawCandlesticksSession(StartTimeTmp, EndTimeTmp);
+        else if ((StartTimeStruct.day_of_week == 2) && (ShowTuesday)) DrawCandlesticksSession(StartTimeTmp, EndTimeTmp);
+        else if ((StartTimeStruct.day_of_week == 3) && (ShowWednesday)) DrawCandlesticksSession(StartTimeTmp, EndTimeTmp);
+        else if ((StartTimeStruct.day_of_week == 4) && (ShowThursday)) DrawCandlesticksSession(StartTimeTmp, EndTimeTmp);
+        else if ((StartTimeStruct.day_of_week == 5) && (ShowFriday)) DrawCandlesticksSession(StartTimeTmp, EndTimeTmp);
+        else if ((StartTimeStruct.day_of_week == 6) && (ShowSaturday)) DrawCandlesticksSession(StartTimeTmp, EndTimeTmp);
         StartTimeTmp -= PeriodSeconds(PERIOD_D1);
         EndTimeTmp -= PeriodSeconds(PERIOD_D1);
     }
@@ -394,8 +403,8 @@ void DrawCandlesticks()
 
 void DrawCandlesticksSession(datetime Start, datetime End)
 {
-    int StartBar = iBarShift(Symbol(), PERIOD_CURRENT, Start);
-    int EndBar = iBarShift(Symbol(), PERIOD_CURRENT, End);
+    int StartBar = iBarShiftCustom(Symbol(), PERIOD_CURRENT, Start);
+    int EndBar = iBarShiftCustom(Symbol(), PERIOD_CURRENT, End);
     if (StartBar == EndBar) return; // Empty session.
     if ((EndBar != 0) || (iTime(Symbol(), PERIOD_CURRENT, 0) >= End)) EndBar++; // End bar itself shouldn't be included unless it's the latest bar that makes a part of the session.
     int BarsCount = StartBar - EndBar + 1;
@@ -444,7 +453,7 @@ void UpdateCurrentCandlestick()
     
     if ((SessionLabel != "") || (ShowRange)) // Update the label if required.
     {
-        int StartBar = iBarShift(Symbol(), PERIOD_CURRENT, LatestSessionStart);
+        int StartBar = iBarShiftCustom(Symbol(), PERIOD_CURRENT, LatestSessionStart);
         int EndBar = 0; // Always the latest bar.
         int BarsCount = StartBar - EndBar + 1;
         double HighPoint = iHigh(Symbol(), PERIOD_CURRENT, iHighest(Symbol(), PERIOD_CURRENT, MODE_HIGH, BarsCount, EndBar));
@@ -458,5 +467,17 @@ void UpdateCurrentCandlestick()
         }
         ObjectSetString(0, LabelName, OBJPROP_TEXT, Text);
     }
+}
+
+int iBarShiftCustom(string symbol, ENUM_TIMEFRAMES tf, datetime time) // Always exact = false.
+{
+    int i = 0;
+    int bars = iBars(symbol, tf);
+    while (iTime(symbol, tf, i) > time)
+    {
+        i++;
+        if (i >= bars) return -1;
+    }
+    return i;
 }
 //+------------------------------------------------------------------+

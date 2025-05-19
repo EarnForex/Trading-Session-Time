@@ -1,13 +1,13 @@
 #property link          "https://www.earnforex.com/metatrader-indicators/trading-session-time/"
-#property version       "1.02"
+#property version       "1.03"
 #property strict
-#property copyright     "EarnForex.com - 2019-2023"
+#property copyright     "EarnForex.com - 2019-2025"
 #property description   "Trading Session Time Indicator"
 #property description   "Draw a vertical line, rectangle, or colored candles for the specified time and day."
-#property description   " "
+#property description   ""
 #property description   "WARNING: Use this software at your own risk."
-#property description   "The creator of these plugins cannot be held responsible for any damage or loss."
-#property description   " "
+#property description   "The creator of this indicator cannot be held responsible for any damage or loss."
+#property description   ""
 #property description   "Find More on www.EarnForex.com"
 #property icon          "\\Files\\EF-Icon-64x64px.ico"
 
@@ -33,7 +33,7 @@
 input string Comment1 = "========================"; // MQLTA Trading Session Time
 input string IndicatorName = "MQLTA-TST";           // Indicator Short Name
 input string Comment2 = "========================"; // Indicator Parameters
-input bool DrawCandles = false;                     // Candlessticks Display
+input bool DrawCandles = false;                     // Candlesticks Display
 input string TimeLineStart = "0000";                // Start Time To Draw (Format 24H HHMM)
 input string TimeLineEnd = "";                      // End Time To Draw (Optional - Format HHMM)
 input bool ShowMonday = true;                       // Show If Monday
@@ -52,6 +52,7 @@ input color LineColor = clrLightGray;               // Objects Color
 input int LineThickness = 5;                        // Objects Thickness (For Line, Set 1 to 5)
 input color	CandleColorBullish = clrLimeGreen;      // Bullish Color
 input color	CandleColorBearish = clrRed;            // Bearish Color
+input bool DrawRectangles = false;                  // Draw Rectangles Instead of Areas?
 
 int StartHour = 0;
 int StartMinute = 0;
@@ -171,17 +172,27 @@ void DrawLines()
     if ((Bars < MaxBars) || (MaxBars == 0)) MaxBars = Bars;
     datetime MaxTime = Time[MaxBars - 1];
     datetime CurrTime = StringToTime(StringConcatenate(TimeYear(Time[0]), ".", TimeMonth(Time[0]), ".", TimeDay(Time[0]), " ", StartHour, ":", StartMinute));
+    if (ShowFutureSession) CurrTime += PeriodSeconds(PERIOD_D1) * 30; // Some distance in the future.
     while (CurrTime > MaxTime)
     {
         if ((ShowFutureSession) || (CurrTime <= Time[0])) // Skip future session if not to be displayed.
         {
-            if ((TimeDayOfWeek(CurrTime) == 0) && (ShowSunday)) DrawLine(CurrTime);
-            if ((TimeDayOfWeek(CurrTime) == 1) && (ShowMonday)) DrawLine(CurrTime);
-            if ((TimeDayOfWeek(CurrTime) == 2) && (ShowTuesday)) DrawLine(CurrTime);
-            if ((TimeDayOfWeek(CurrTime) == 3) && (ShowWednesday)) DrawLine(CurrTime);
-            if ((TimeDayOfWeek(CurrTime) == 4) && (ShowThursday)) DrawLine(CurrTime);
-            if ((TimeDayOfWeek(CurrTime) == 5) && (ShowFriday)) DrawLine(CurrTime);
-            if ((TimeDayOfWeek(CurrTime) == 6) && (ShowSaturday)) DrawLine(CurrTime);
+            bool allow_draw = true;
+            if (CurrTime <= Time[0])
+            {
+                datetime bar_time = Time[iBarShift(Symbol(), PERIOD_CURRENT, CurrTime)];
+                if (TimeDayOfWeek(bar_time) != TimeDayOfWeek(CurrTime)) allow_draw = false; // To avoid drawing the day of the week on the next one when the needed one is missing.
+            }
+            if (allow_draw)
+            {
+                if ((TimeDayOfWeek(CurrTime) == 0) && (ShowSunday)) DrawLine(CurrTime);
+                else if ((TimeDayOfWeek(CurrTime) == 1) && (ShowMonday)) DrawLine(CurrTime);
+                else if ((TimeDayOfWeek(CurrTime) == 2) && (ShowTuesday)) DrawLine(CurrTime);
+                else if ((TimeDayOfWeek(CurrTime) == 3) && (ShowWednesday)) DrawLine(CurrTime);
+                else if ((TimeDayOfWeek(CurrTime) == 4) && (ShowThursday)) DrawLine(CurrTime);
+                else if ((TimeDayOfWeek(CurrTime) == 5) && (ShowFriday)) DrawLine(CurrTime);
+                else if ((TimeDayOfWeek(CurrTime) == 6) && (ShowSaturday)) DrawLine(CurrTime);
+            }
         }
         CurrTime -= PERIOD_D1 * 60;
     }
@@ -197,7 +208,7 @@ void DrawLine(datetime LineTime)
     ObjectSetInteger(0, LineName, OBJPROP_HIDDEN, true);
     ObjectSetInteger(0, LineName, OBJPROP_SELECTED, false);
     ObjectSetInteger(0, LineName, OBJPROP_WIDTH, LineThickness);
-    if ((SessionLabel != "") || (ShowRange))
+    if (((SessionLabel != "") || (ShowRange)) && (LineTime <= Time[0])) // Won't work for future sessions.
     {
         datetime StartTimeTmp = LineTime;
         datetime EndTimeTmp = StringToTime(StringConcatenate(TimeYear(LineTime), ".", TimeMonth(LineTime), ".", TimeDay(LineTime), " ", 23, ":", 59));
@@ -264,16 +275,13 @@ void DrawAreas()
     }
     while (StartTimeTmp > MaxTime)
     {
-        if ((ShowFutureSession) || (StartTimeTmp <= Time[0])) // Skip future session if not to be displayed.
-        {
-            if ((TimeDayOfWeek(StartTimeTmp) == 0) && (ShowSunday)) DrawArea(StartTimeTmp, EndTimeTmp);
-            if ((TimeDayOfWeek(StartTimeTmp) == 1) && (ShowMonday)) DrawArea(StartTimeTmp, EndTimeTmp);
-            if ((TimeDayOfWeek(StartTimeTmp) == 2) && (ShowTuesday)) DrawArea(StartTimeTmp, EndTimeTmp);
-            if ((TimeDayOfWeek(StartTimeTmp) == 3) && (ShowWednesday)) DrawArea(StartTimeTmp, EndTimeTmp);
-            if ((TimeDayOfWeek(StartTimeTmp) == 4) && (ShowThursday)) DrawArea(StartTimeTmp, EndTimeTmp);
-            if ((TimeDayOfWeek(StartTimeTmp) == 5) && (ShowFriday)) DrawArea(StartTimeTmp, EndTimeTmp);
-            if ((TimeDayOfWeek(StartTimeTmp) == 6) && (ShowSaturday)) DrawArea(StartTimeTmp, EndTimeTmp);
-        }
+        if ((TimeDayOfWeek(StartTimeTmp) == 0) && (ShowSunday)) DrawArea(StartTimeTmp, EndTimeTmp);
+        else if ((TimeDayOfWeek(StartTimeTmp) == 1) && (ShowMonday)) DrawArea(StartTimeTmp, EndTimeTmp);
+        else if ((TimeDayOfWeek(StartTimeTmp) == 2) && (ShowTuesday)) DrawArea(StartTimeTmp, EndTimeTmp);
+        else if ((TimeDayOfWeek(StartTimeTmp) == 3) && (ShowWednesday)) DrawArea(StartTimeTmp, EndTimeTmp);
+        else if ((TimeDayOfWeek(StartTimeTmp) == 4) && (ShowThursday)) DrawArea(StartTimeTmp, EndTimeTmp);
+        else if ((TimeDayOfWeek(StartTimeTmp) == 5) && (ShowFriday)) DrawArea(StartTimeTmp, EndTimeTmp);
+        else if ((TimeDayOfWeek(StartTimeTmp) == 6) && (ShowSaturday)) DrawArea(StartTimeTmp, EndTimeTmp);
         StartTimeTmp -= PERIOD_D1 * 60;
         EndTimeTmp -= PERIOD_D1 * 60;
     }
@@ -292,12 +300,12 @@ void DrawArea(datetime Start, datetime End)
 
     ObjectCreate(0, AreaName, OBJ_RECTANGLE, 0, Start, HighPoint, End, LowPoint);
     ObjectSetInteger(0, AreaName, OBJPROP_COLOR, LineColor);
-    ObjectSetInteger(0, AreaName, OBJPROP_BACK, true);
+    ObjectSetInteger(0, AreaName, OBJPROP_BACK, !DrawRectangles);
     ObjectSetInteger(0, AreaName, OBJPROP_STYLE, STYLE_SOLID);
     ObjectSetInteger(0, AreaName, OBJPROP_HIDDEN, true);
-    ObjectSetInteger(0, AreaName, OBJPROP_FILL, true);
+    ObjectSetInteger(0, AreaName, OBJPROP_FILL, !DrawRectangles);
     ObjectSetInteger(0, AreaName, OBJPROP_SELECTED, false);
-    ObjectSetInteger(0, AreaName, OBJPROP_WIDTH, LineThickness);
+    ObjectSetInteger(0, AreaName, OBJPROP_SELECTABLE, false);
 
     if ((SessionLabel != "") || (ShowRange))
     {
