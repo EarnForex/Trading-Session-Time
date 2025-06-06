@@ -1,5 +1,5 @@
 #property link          "https://www.earnforex.com/metatrader-indicators/trading-session-time/"
-#property version       "1.03"
+#property version       "1.04"
 
 #property copyright     "EarnForex.com - 2019-2025"
 #property description   "Trading Session Time Indicator"
@@ -295,7 +295,7 @@ void DrawArea(datetime Start, datetime End)
     int StartBar = iBarShiftCustom(Symbol(), PERIOD_CURRENT, Start);
     int EndBar = iBarShiftCustom(Symbol(), PERIOD_CURRENT, End);
     if (StartBar == EndBar) return; // Empty session.
-    if ((EndBar != 0) || (iTime(Symbol(), PERIOD_CURRENT, 0) >= End)) EndBar++; // End bar itself shouldn't be included unless it's the latest bar that makes a part of the session.
+    if (((EndBar != 0) || (iTime(Symbol(), PERIOD_CURRENT, 0) >= End)) && ((EndMinute != 59) || (EndHour != 23))) EndBar++; // End bar itself shouldn't be included unless it's the latest bar that makes a part of the current session or it's a 23:59 end of day.
     int BarsCount = StartBar - EndBar + 1;
     double HighPoint = iHigh(Symbol(), PERIOD_CURRENT, iHighest(Symbol(), PERIOD_CURRENT, MODE_HIGH, BarsCount, EndBar));
     double LowPoint = iLow(Symbol(), PERIOD_CURRENT, iLowest(Symbol(), PERIOD_CURRENT, MODE_LOW, BarsCount, EndBar));
@@ -382,6 +382,7 @@ void DrawCandlesticks()
     datetime EndTime = StringToTime(EndTimeStructStr);
     datetime StartTimeTmp = StringToTime(StartTimeStructStr);
     datetime EndTimeTmp = StringToTime(EndTimeStructStr);
+
     if (StartTimeTmp > EndTimeTmp)
     {
         EndTimeTmp += PeriodSeconds(PERIOD_D1);
@@ -406,7 +407,7 @@ void DrawCandlesticksSession(datetime Start, datetime End)
     int StartBar = iBarShiftCustom(Symbol(), PERIOD_CURRENT, Start);
     int EndBar = iBarShiftCustom(Symbol(), PERIOD_CURRENT, End);
     if (StartBar == EndBar) return; // Empty session.
-    if ((EndBar != 0) || (iTime(Symbol(), PERIOD_CURRENT, 0) >= End)) EndBar++; // End bar itself shouldn't be included unless it's the latest bar that makes a part of the session.
+    if (((EndBar != 0) || (iTime(Symbol(), PERIOD_CURRENT, 0) >= End)) && ((EndMinute != 59) || (EndHour != 23))) EndBar++; // End bar itself shouldn't be included unless it's the latest bar that makes a part of the current session or it's a 23:59 end of day.
     int BarsCount = StartBar - EndBar + 1;
 
     for (int i = StartBar; i >= EndBar; i--)
