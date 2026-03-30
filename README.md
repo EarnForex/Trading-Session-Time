@@ -4,6 +4,8 @@ Trading Session Time is an indicator for MT4 and MT5 by EarnForex.com. It displa
 
 You can add multiple instances of the indicator to the same chart to customize your trading session display even more.
 
+The indicator supports notification alerts for a session start/end.
+
 ![Seven instances of colored candlestick Trading Session Time indicators on this example ETH/USD chart](https://github.com/EarnForex/Trading-Session-Time/blob/main/README_Images/trading-sessions-ethusd.png)
 
 A detailed description of the indicator can be found here:
